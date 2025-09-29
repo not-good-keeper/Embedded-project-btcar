@@ -1,0 +1,101 @@
+#include "stm32f4xx.h"
+float dist ;
+#define TRIG_PIN 2     // PA2 output (HC-SR04 trigger)
+#define ECHO_PIN 3     // PA3 input  (HC-SR04 echo)
+
+volatile uint32_t msTicks;
+volatile uint8_t echo_received = 0;
+volatile uint32_t pulse_start = 0, pulse_end = 0;
+
+void SysTick_Handler(void) {
+    msTicks++;
+}
+
+// Simple delay in ms using SysTick
+void Delay_ms(uint32_t ms) {
+    uint32_t start = msTicks;
+    while ((msTicks - start) < ms);
+}
+
+// Initialize GPIO pins and EXTI for echo input
+void HC_SR04_Init(void) {
+    RCC->AHB1ENR |= RCC_AHB1ENR_GPIOAEN;
+    RCC->APB2ENR |= RCC_APB2ENR_SYSCFGEN;
+
+    // Trigger pin PA2 output
+    GPIOA->MODER &= ~(3 << (TRIG_PIN*2));
+    GPIOA->MODER |= (1 << (TRIG_PIN*2)); // output
+    GPIOA->OTYPER &= ~(1 << TRIG_PIN);   // push-pull
+    GPIOA->OSPEEDR |= (3 << (TRIG_PIN*2)); // high speed
+    GPIOA->PUPDR &= ~(3 << (TRIG_PIN*2));  // no pull-up/down
+
+    // Echo pin PA3 input with pull-down (can detect rising edge)
+    GPIOA->MODER &= ~(3 << (ECHO_PIN*2)); // input mode
+    GPIOA->PUPDR &= ~(3 << (ECHO_PIN*2));
+    GPIOA->PUPDR |= (2 << (ECHO_PIN*2)); // pull-down
+
+    // Connect EXTI line3 to PA3
+    SYSCFG->EXTICR[0] &= ~SYSCFG_EXTICR1_EXTI3;
+    SYSCFG->EXTICR[0] |= SYSCFG_EXTICR1_EXTI3_PA;
+
+    // Configure EXTI line3 for rising and falling edge
+    EXTI->IMR |= (1 << ECHO_PIN);
+    EXTI->RTSR |= (1 << ECHO_PIN);
+    EXTI->FTSR |= (1 << ECHO_PIN);
+
+    // Enable EXTI3 Interrupt
+    NVIC_SetPriority(EXTI3_IRQn, 1);
+    NVIC_EnableIRQ(EXTI3_IRQn);
+}
+
+// EXTI3 Interrupt handler for Echo pin
+void EXTI3_IRQHandler(void) {
+    if (EXTI->PR & (1 << ECHO_PIN)) {
+        if (GPIOA->IDR & (1 << ECHO_PIN)) {
+            // Rising edge: start timing
+            pulse_start = msTicks;
+            echo_received = 0;
+        } else {
+            // Falling edge: end timing
+            pulse_end = msTicks;
+            echo_received = 1;
+        }
+        EXTI->PR = (1 << ECHO_PIN); // clear pending
+    }
+}
+
+// Trigger HC-SR04 sensor: pulse high for 10us
+void HC_SR04_Trigger(void) {
+    GPIOA->BSRR = (1 << TRIG_PIN);
+    for (volatile int i=0; i<160; i++); // approx 10us delay at 16MHz
+    GPIOA->BSRR = (1 << (TRIG_PIN + 16));
+}
+
+// Measure distance in cm, returns 0 if no echo received within 60ms timeout
+float HC_SR04_ReadDistance(void) {
+    HC_SR04_Trigger();
+    echo_received = 0;
+
+    uint32_t timeout_start = msTicks;
+    while(!echo_received) {
+        if ((msTicks - timeout_start) > 60) return 0.0f;
+    }
+
+    uint32_t pulse_duration = pulse_end - pulse_start; // time in ms
+    float distance_cm = (float)(pulse_duration) * 0.0343f / 2.0f;
+    return distance_cm;
+}
+
+int main(void) {
+    SysTick->LOAD = 16000 - 1;
+    SysTick->VAL = 0;
+    SysTick->CTRL = 7; // processor clock, enable interrupt
+
+    HC_SR04_Init();
+
+    while (1) {
+        dist= HC_SR04_ReadDistance();
+        // Use distance (dist) in cm - e.g., display or control logic
+        Delay_ms(500);
+    }
+}

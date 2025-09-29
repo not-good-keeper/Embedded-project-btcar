@@ -1,0 +1,20 @@
+pot_pin PA0
+BTN_PIN  PB10
+ENA_PIN PB1
+ENB_PIN PB2
+IN1_PIN PB4
+IN2_PIN PB5
+IN3_PIN PB12
+IN4_PIN PB13
+PA6-button
+PA1-LDR
+PC13-LED
+PC14-LED
+PB9-LED
+i2c -B6&B7 to mpu6050
+UART1-all pins fOR ESP32CAM
+
+Sensor  |  Trigger  |  Echo
+--------+-----------+------
+#1      |  PA2      |  PA3 
+#2      |  PA4      |  PA5 
